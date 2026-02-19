@@ -12,6 +12,8 @@ import HabitsTab from './components/HabitsTab'
 import SystemsTab from './components/SystemsTab'
 import BottomNav from './components/BottomNav'
 import DaySchedule from './components/DaySchedule'
+import { useArchetype } from './hooks/useArchetype'
+import { useCurrentPhase } from './hooks/useCurrentPhase'
 
 function Dashboard({ archetype, profile, isSessionActive, onStartSession, onEndSession }) {
   const now = new Date()
