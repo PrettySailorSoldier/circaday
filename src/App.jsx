@@ -11,39 +11,16 @@ import PlanTab from './components/PlanTab'
 import HabitsTab from './components/HabitsTab'
 import SystemsTab from './components/SystemsTab'
 import BottomNav from './components/BottomNav'
-import GuidedSession from './components/GuidedSession'
-import { useArchetype } from './hooks/useArchetype'
-import { useCurrentPhase } from './hooks/useCurrentPhase'
-import { AnimatePresence } from 'framer-motion'
+import DaySchedule from './components/DaySchedule'
 
-function Dashboard({ archetype, profile }) {
+function Dashboard({ archetype, profile, isSessionActive, onStartSession, onEndSession }) {
   const now = new Date()
   const currentHour = now.getHours()
   const currentMinute = now.getMinutes()
   const currentPhase = useCurrentPhase(archetype?.arcSchedule)
-  const [isSessionActive, setIsSessionActive] = useState(false)
-  const [showSessionOverlay, setShowSessionOverlay] = useState(false)
-  const [sessionData, setSessionData] = useState(null)
-
-  const handleStartSession = (data) => {
-    setSessionData(data)
-    setIsSessionActive(true)
-    setShowSessionOverlay(false)
-  }
 
   return (
     <div style={styles.dashboardContainer}>
-      <AnimatePresence>
-        {showSessionOverlay && (
-          <GuidedSession 
-            archetype={archetype}
-            quizAnswers={profile?.quiz_answers}
-            onClose={() => setShowSessionOverlay(false)}
-            onStartSession={handleStartSession}
-          />
-        )}
-      </AnimatePresence>
-
       <div style={styles.greeting}>
         <span style={styles.dateText}>
           {now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}
@@ -58,21 +35,21 @@ function Dashboard({ archetype, profile }) {
         isSessionActive={isSessionActive}
       />
       
-      {/* Session Active Indicator or Phase Card */}
       {isSessionActive ? (
-        <div style={styles.activeSessionCard}>
-          <h3 style={styles.sessionTitle}>Guided Session Active</h3>
-          <p style={styles.sessionGoal}>{sessionData?.intention || 'Focus Time'}</p>
-          <button onClick={() => setIsSessionActive(false)} style={styles.endSessionBtn}>
-            End Session
-          </button>
-        </div>
+        <DaySchedule 
+          arcSchedule={archetype?.arcSchedule} 
+          currentPhase={currentPhase} 
+          onEndSession={onEndSession} 
+        />
       ) : (
         <>
           {currentPhase && <PhaseCard phase={currentPhase} />}
           <button 
             style={styles.startSessionBtn}
-            onClick={() => setShowSessionOverlay(true)}
+            onClick={() => onStartSession({ 
+              schedule: archetype?.arcSchedule, 
+              archetype: archetype?.name 
+            })}
           >
             Start Guided Session
           </button>
@@ -92,6 +69,20 @@ function getTimeOfDay() {
 function MainApp() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const { archetype, profile, loading } = useArchetype()
+  
+  // Session State Lifted
+  const [isSessionActive, setIsSessionActive] = useState(false)
+  const [sessionData, setSessionData] = useState(null)
+
+  const handleStartSession = (data) => {
+    setSessionData(data)
+    setIsSessionActive(true)
+  }
+
+  const handleEndSession = () => {
+    setIsSessionActive(false)
+    setSessionData(null)
+  }
 
   if (loading) {
     return (
@@ -104,7 +95,15 @@ function MainApp() {
   return (
     <div style={styles.appContainer}>
       <div style={styles.mainContent}>
-        {activeTab === 'dashboard' && <Dashboard archetype={archetype} profile={profile} />}
+        {activeTab === 'dashboard' && (
+          <Dashboard 
+            archetype={archetype} 
+            profile={profile} 
+            isSessionActive={isSessionActive}
+            onStartSession={handleStartSession}
+            onEndSession={handleEndSession}
+          />
+        )}
         {activeTab === 'plan' && <PlanTab />}
         {activeTab === 'habits' && <HabitsTab />}
         {activeTab === 'systems' && <SystemsTab />}

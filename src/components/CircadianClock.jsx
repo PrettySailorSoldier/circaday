@@ -130,19 +130,27 @@ export default function CircadianClock({ arcSchedule, currentHour, currentMinute
 
         {/* CLOCK ARCS (Only when session is active) */}
         {isSessionActive && arcSchedule?.map((phase, i) => {
-           const isCurrent = currentPhase?.id === phase.id
+           // Color mapping based on new requirements
+           let strokeColor = '#8b7fd4'
+           if (phase.type === 'focus' || phase.type === 'deep_work') strokeColor = '#c084fc'
+           else if (phase.type === 'rest') strokeColor = '#60a5fa'
+           else if (phase.type === 'creative') strokeColor = '#f472b6'
+           else if (phase.type === 'admin') strokeColor = '#94a3b8'
+           else if (phase.type === 'general') strokeColor = '#8b7fd4'
+           else if (PHASE_COLORS[phase.type]) strokeColor = PHASE_COLORS[phase.type]
+
            return (
              <motion.path
                key={`arc-${i}`}
                d={getArcPath(phase.startHour, phase.endHour)}
                fill="none"
-               stroke={PHASE_COLORS[phase.type] || PHASE_COLORS.general}
+               stroke={strokeColor}
                strokeWidth="6"
                strokeLinecap="round"
                initial={{ pathLength: 0, opacity: 0 }}
                animate={{ 
                  pathLength: 1, 
-                 opacity: isCurrent ? 1 : 0.4
+                 opacity: 1 
                }}
                transition={{ duration: 1, delay: i * 0.1 }}
              />

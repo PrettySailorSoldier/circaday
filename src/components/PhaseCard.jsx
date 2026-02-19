@@ -37,13 +37,7 @@ export default function PhaseCard({ phase }) {
             </span>
           </div>
 
-          <motion.button
-            style={styles.actionButton}
-            whileTap={{ scale: 0.98 }}
-          >
-            <span style={styles.playIcon}>▶</span>
-            Start Guided Session
-          </motion.button>
+
         </motion.div>
       </AnimatePresence>
     </div>
