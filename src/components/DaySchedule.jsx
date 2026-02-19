@@ -20,17 +20,9 @@ const BLOCK_CONFIG = {
   },
   // Mapping existing types to new config
   deep_work: {
-    color: '#7B6FD4', // using rest/focus color (blue-purple) or custom? 
-    // Wait, request said Rest is #7B6FD4. 
+    // Request said Rest is #7B6FD4. 
     // Let's stick to the requested palette strictly for the new types, 
     // and map existing ones to the closest match.
-    // "Rest — #7B6FD4"
-    // "Creative — #D4728A"
-    // "Admin — #C4A35A"
-    // "Shallow Work — #5AB4B4"
-    
-    // Existing types: focus, deep_work, social, general, windDown
-    // Let's map them:
     color: '#7B6FD4', // fallback or similar
     icon: '🧠'
   },
