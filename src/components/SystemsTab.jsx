@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { supabase, getSystems, createSystem, updateSystemActive } from '../lib/supabase'
+import { getCurrentUser, getSystems, createSystem, updateSystemActive } from '../lib/db'
 
 const CATEGORIES = [
   { id: 'focus', label: 'Focus', color: '#5b7fa6' },
@@ -23,7 +23,7 @@ export default function SystemsTab() {
   }, [])
 
   async function loadSystems() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     const systemsData = await getSystems(user.id)
@@ -34,10 +34,11 @@ export default function SystemsTab() {
   async function handleAddSystem() {
     if (!newRuleText.trim()) return
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     const { data } = await createSystem(user.id, newRuleText.trim(), newCategory)
+
     if (data) {
       setSystems([...systems, data])
       setNewRuleText('')

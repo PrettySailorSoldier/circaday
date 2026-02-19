@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { supabase, getHabits, getHabitLogs, createHabit, toggleHabitLog } from '../lib/supabase'
+import { getCurrentUser, getHabits, getHabitLogs, createHabit, toggleHabitLog } from '../lib/db'
 
 const HABIT_COLORS = [
   '#5b7fa6', // deepFocus blue
@@ -24,7 +24,7 @@ export default function HabitsTab() {
   }, [])
 
   async function loadData() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     const [habitsData, logsData] = await Promise.all([
@@ -40,7 +40,7 @@ export default function HabitsTab() {
   async function handleAddHabit() {
     if (!newHabitName.trim()) return
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     const { data } = await createHabit(user.id, newHabitName.trim(), newHabitColor)
@@ -53,10 +53,11 @@ export default function HabitsTab() {
   }
 
   async function handleToggleLog(habitId, date) {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     const { data, deleted } = await toggleHabitLog(user.id, habitId, date)
+
 
     if (deleted) {
       setLogs(logs.filter(l => !(l.habit_id === habitId && l.logged_date === date)))

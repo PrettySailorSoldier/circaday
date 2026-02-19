@@ -1,47 +1,37 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { signInWithOtp, verifyOtp } from '../lib/supabase'
+import { account, ID_GEN } from '../lib/appwrite'
 
-export default function Auth() {
+export default function Auth({ onLogin }) {
   const [email, setEmail] = useState('')
-  const [otpCode, setOtpCode] = useState('')
-  const [step, setStep] = useState('email') // 'email' | 'otp'
+  const [password, setPassword] = useState('')
+  const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleEmailSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!email) return
+    if (!email || !password) return
 
     setLoading(true)
     setError('')
 
-    const { error } = await signInWithOtp(email)
-
-    if (error) {
-      setError(error.message)
-    } else {
-      setStep('otp')
+    try {
+      if (isSignUp) {
+        await account.create(ID_GEN.unique(), email, password)
+      }
+      
+      await account.createEmailPasswordSession(email, password)
+      
+      if (onLogin) {
+        onLogin()
+      }
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Authentication failed')
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
-  }
-
-  const handleOtpSubmit = async (e) => {
-    e.preventDefault()
-    if (!otpCode) return
-
-    setLoading(true)
-    setError('')
-
-    const { error } = await verifyOtp(email, otpCode)
-
-    if (error) {
-      setError(error.message)
-    }
-    // If successful, the auth state change will redirect automatically
-
-    setLoading(false)
   }
 
   return (
@@ -58,70 +48,53 @@ export default function Auth() {
           Your personalized productivity rhythm
         </p>
 
-        {step === 'email' ? (
-          <form onSubmit={handleEmailSubmit} style={styles.form}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>EMAIL</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                style={styles.input}
-                autoComplete="email"
-              />
-            </div>
+        <form onSubmit={handleSubmit} style={styles.form}>
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>EMAIL</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              style={styles.input}
+              autoComplete="email"
+            />
+          </div>
 
-            {error && <p style={styles.error}>{error}</p>}
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>PASSWORD</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              style={styles.input}
+              autoComplete={isSignUp ? "new-password" : "current-password"}
+            />
+          </div>
 
-            <motion.button
-              type="submit"
-              style={styles.button}
-              disabled={loading || !email}
-              whileTap={{ scale: 0.98 }}
-            >
-              {loading ? 'Sending...' : 'Continue with Email'}
-            </motion.button>
-          </form>
-        ) : (
-          <form onSubmit={handleOtpSubmit} style={styles.form}>
-            <p style={styles.otpMessage}>
-              We sent a code to <strong>{email}</strong>
-            </p>
+          {error && <p style={styles.error}>{error}</p>}
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>VERIFICATION CODE</label>
-              <input
-                type="text"
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value)}
-                placeholder="Enter 6-digit code"
-                style={styles.input}
-                autoComplete="one-time-code"
-                maxLength={6}
-              />
-            </div>
+          <motion.button
+            type="submit"
+            style={styles.button}
+            disabled={loading || !email || !password}
+            whileTap={{ scale: 0.98 }}
+          >
+            {loading ? 'Thinking...' : (isSignUp ? 'Create Account' : 'Log In')}
+          </motion.button>
 
-            {error && <p style={styles.error}>{error}</p>}
-
-            <motion.button
-              type="submit"
-              style={styles.button}
-              disabled={loading || !otpCode}
-              whileTap={{ scale: 0.98 }}
-            >
-              {loading ? 'Verifying...' : 'Verify Code'}
-            </motion.button>
-
-            <button
-              type="button"
-              onClick={() => setStep('email')}
-              style={styles.backButton}
-            >
-              Use a different email
-            </button>
-          </form>
-        )}
+          <button
+            type="button"
+            onClick={() => {
+              setIsSignUp(!isSignUp)
+              setError('')
+            }}
+            style={styles.backButton}
+          >
+            {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
+          </button>
+        </form>
       </motion.div>
 
       {/* Background glow */}

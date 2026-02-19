@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { quizQuestions, calculateArchetype } from '../data/archetypes'
-import { supabase, createProfile } from '../lib/supabase'
+import { getCurrentUser, createProfile } from '../lib/db'
 
 export default function QuizFlow({ onComplete }) {
   const [currentQuestion, setCurrentQuestion] = useState(0)
@@ -29,8 +29,8 @@ export default function QuizFlow({ onComplete }) {
         // Quiz complete - calculate archetype
         const archetype = calculateArchetype(newAnswers)
 
-        // Save to Supabase
-        const { data: { user } } = await supabase.auth.getUser()
+        // Save to Database
+        const { data: { user } } = await getCurrentUser()
         if (user) {
           await createProfile(user.id, archetype.id, newAnswers)
         }

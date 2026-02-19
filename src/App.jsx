@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { supabase, getProfile } from './lib/supabase'
+import { account } from './lib/appwrite'
+import { getProfile } from './lib/db'
 import Auth from './components/Auth'
 import QuizFlow from './components/QuizFlow'
 import ProfileReveal from './components/ProfileReveal'
@@ -84,27 +85,27 @@ export default function App() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) {
-        checkProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
-    })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) {
-        checkProfile(session.user.id)
-      } else {
-        setProfile(null)
-        setLoading(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
+    checkSession()
   }, [])
+
+  async function checkSession() {
+    try {
+      const user = await account.get()
+      // Map Appwrite user to a session-like object compatible with existing code (user.id)
+      const sessionData = {
+        user: {
+          id: user.$id,
+          ...user
+        }
+      }
+      setSession(sessionData)
+      checkProfile(user.$id)
+    } catch (error) {
+      setSession(null)
+      setProfile(null)
+      setLoading(false)
+    }
+  }
 
   async function checkProfile(userId) {
     const profileData = await getProfile(userId)
@@ -123,7 +124,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/auth" element={
-        session ? <Navigate to="/" /> : <Auth />
+        session ? <Navigate to="/" /> : <Auth onLogin={checkSession} />
       } />
       <Route path="/quiz" element={
         !session ? <Navigate to="/auth" /> :

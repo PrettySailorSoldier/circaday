@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { supabase, getTodayIntention, saveIntention } from '../lib/supabase'
+import { getCurrentUser, getTodayIntention, saveIntention } from '../lib/db'
 import { frameworks, frameworkOrder } from '../data/frameworks'
 
 export default function PlanTab() {
@@ -16,22 +16,28 @@ export default function PlanTab() {
   }, [])
 
   async function loadTodayIntention() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     const intention = await getTodayIntention(user.id)
     if (intention) {
       setActiveFramework(intention.framework)
-      setFormData(intention.content || {})
+      setFormData(intention.content ? (typeof intention.content === 'string' ? JSON.parse(intention.content) : intention.content) : {})
+      // Note: intention.content might be stringified if I followed instruction.
+      // Instruction: "content (string — store as JSON.stringify'd object)".
+      // So Appwrite returns it as string.
+      // Supabase returned it probably as JSON B or parsed by client? Supabase client parses JSON columns automatically.
+      // Appwrite "string" attribute is just a string. So I must parse it.
     }
   }
 
   async function handleSave() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await getCurrentUser()
     if (!user) return
 
     setSaving(true)
     await saveIntention(user.id, activeFramework, formData)
+
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
