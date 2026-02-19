@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
-export default function CircadianClock({ arcSchedule, currentHour, currentMinute }) {
+export default function CircadianClock({ arcSchedule, currentHour, currentMinute, isSessionActive }) {
   const [time, setTime] = useState({ hour: currentHour, minute: currentMinute })
 
   useEffect(() => {
@@ -54,6 +54,60 @@ export default function CircadianClock({ arcSchedule, currentHour, currentMinute
   const handX = 200 + handLength * Math.cos(handRadian)
   const handY = 200 + handLength * Math.sin(handRadian)
 
+  // --- ARC LOGIC ---
+  const PHASE_COLORS = {
+    focus: '#6366f1',   // Indigo
+    social: '#f59e0b',  // Gold
+    rest: '#2dd4bf',    // Teal
+    admin: '#f43f5e',   // Rose
+    general: '#a78bfa', // Lavender (Wind down / default)
+    windDown: '#a78bfa'
+  }
+
+  const getArcPath = (startHour, endHour) => {
+    // Convert hours to angles (0h = -90deg, 6h = 0deg, 12h = 90deg, 18h = 180deg)
+    // 24h clock: 360deg / 24h = 15deg per hour
+    
+    // Normalize hours to 0-24
+    let start = startHour
+    let end = endHour
+    
+    // Calculate angles
+    const startAngle = (start / 24) * 360 - 90
+    let endAngle = (end / 24) * 360 - 90
+    
+    // Handle wrapping (e.g. 23:00 to 07:00)
+    if (end < start) {
+      endAngle = ((end + 24) / 24) * 360 - 90
+    }
+    
+    const radius = 175 // Outside the clock ticks (158) with gap
+    
+    // Convert to radians
+    const startRad = (startAngle * Math.PI) / 180
+    const endRad = (endAngle * Math.PI) / 180
+    
+    const x1 = 200 + radius * Math.cos(startRad)
+    const y1 = 200 + radius * Math.sin(startRad)
+    const x2 = 200 + radius * Math.cos(endRad)
+    const y2 = 200 + radius * Math.sin(endRad)
+    
+    // SVG Path command
+    // M = move to start
+    // A = arc to end (rx ry x-axis-rotation large-arc-flag sweep-flag x y)
+    const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1"
+    
+    return `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`
+  }
+
+  // Current time marker on the arc ring
+  const timeMarkerAngle = handAngle
+  const timeMarkerRad = (timeMarkerAngle * Math.PI) / 180
+  const timeMarkerRadius = 175
+  const timeMarkerX = 200 + timeMarkerRadius * Math.cos(timeMarkerRad)
+  const timeMarkerY = 200 + timeMarkerRadius * Math.sin(timeMarkerRad)
+
+
   return (
     <div style={styles.container}>
       {/* Background glow */}
@@ -73,6 +127,41 @@ export default function CircadianClock({ arcSchedule, currentHour, currentMinute
             <stop offset="100%" stopColor="#0d0d14" stopOpacity="0" />
           </radialGradient>
         </defs>
+
+        {/* CLOCK ARCS (Only when session is active) */}
+        {isSessionActive && arcSchedule?.map((phase, i) => {
+           const isCurrent = currentPhase?.id === phase.id
+           return (
+             <motion.path
+               key={`arc-${i}`}
+               d={getArcPath(phase.startHour, phase.endHour)}
+               fill="none"
+               stroke={PHASE_COLORS[phase.type] || PHASE_COLORS.general}
+               strokeWidth="6"
+               strokeLinecap="round"
+               initial={{ pathLength: 0, opacity: 0 }}
+               animate={{ 
+                 pathLength: 1, 
+                 opacity: isCurrent ? 1 : 0.4
+               }}
+               transition={{ duration: 1, delay: i * 0.1 }}
+             />
+           )
+        })}
+
+        {/* Current Time Marker on Arc Ring (Only when session is active) */}
+        {isSessionActive && (
+          <motion.circle 
+            cx={timeMarkerX}
+            cy={timeMarkerY}
+            r="4"
+            fill={PHASE_COLORS[currentPhase?.type] || '#fff'}
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 1, duration: 0.3 }}
+          />
+        )}
+
 
         {/* Subtle background glow circle */}
         <circle cx="200" cy="200" r="180" fill="url(#clockGlow)" />
@@ -173,7 +262,8 @@ const styles = {
     width: '100%',
     height: '100%',
     position: 'relative',
-    zIndex: 1
+    zIndex: 1,
+    overflow: 'visible' // Important for arcs extending beyond viewbox if needed, though they are within 400x400
   },
   centerContent: {
     position: 'absolute',

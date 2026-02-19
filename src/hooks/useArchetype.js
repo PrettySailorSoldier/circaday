@@ -4,6 +4,7 @@ import { archetypes } from '../data/archetypes'
 
 export function useArchetype() {
   const [archetype, setArchetype] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -17,22 +18,23 @@ export function useArchetype() {
           return
         }
 
-        const profile = await getProfile(user.id) // Appwrite user.$id? No, getCurrentUser returns { user } which is the Appwrite user object. So user.$id.
-        // Wait! getCurrentUser returns { data: { user } }. The `account.get()` returns object with $id.
-        // Supabase user has `id`. Appwrite user has `$id`.
-        // My helper just returns the Appwrite user object as `user`.
-        // So `user.id` will be UNDEFINED. I must use `user.$id`.
+        const userProfile = await getProfile(user.id)
         
-        // I need to update this usage in ALL files.
-        // OR I can map the user object in `getCurrentUser` helper to have `id`.
-        
-        // Let's UPDATE THE HELPER in `db.ts` to be safer!
-        // This avoids changing `user.id` to `user.$id` in 5 files.
-        
+        if (userProfile) {
+          // Parse quiz_answers if it's a string (Appwrite stores JSON as string)
+          if (userProfile.quiz_answers && typeof userProfile.quiz_answers === 'string') {
+            try {
+              userProfile.quiz_answers = JSON.parse(userProfile.quiz_answers)
+            } catch (e) {
+              console.error('Failed to parse quiz_answers', e)
+            }
+          }
 
+          setProfile(userProfile) // Store full profile
 
-        if (profile?.archetype_id && archetypes[profile.archetype_id]) {
-          setArchetype(archetypes[profile.archetype_id])
+          if (userProfile.archetype_id && archetypes[userProfile.archetype_id]) {
+            setArchetype(archetypes[userProfile.archetype_id])
+          }
         }
       } catch (err) {
         console.error('Error loading archetype:', err)
@@ -45,7 +47,7 @@ export function useArchetype() {
     loadArchetype()
   }, [])
 
-  return { archetype, loading, error }
+  return { archetype, profile, loading, error }
 }
 
 export default useArchetype
