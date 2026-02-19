@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npx -p vite vite build",
-    "preview": "vite preview"
+    "build": "./node_modules/.bin/vite build",
+    "postinstall": "chmod +x node_modules/.bin/vite"
   },
   "dependencies": {
     "appwrite": "^22.3.1",
