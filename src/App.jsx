@@ -12,6 +12,7 @@ import HabitsTab from './components/HabitsTab'
 import SystemsTab from './components/SystemsTab'
 import BottomNav from './components/BottomNav'
 import DaySchedule from './components/DaySchedule'
+import MirrorTab from './components/MirrorTab'
 import { useArchetype } from './hooks/useArchetype'
 import { useCurrentPhase } from './hooks/useCurrentPhase'
 
@@ -106,6 +107,7 @@ function MainApp() {
             onEndSession={handleEndSession}
           />
         )}
+        {activeTab === 'mirror' && <MirrorTab />}
         {activeTab === 'plan' && <PlanTab />}
         {activeTab === 'habits' && <HabitsTab />}
         {activeTab === 'systems' && <SystemsTab />}

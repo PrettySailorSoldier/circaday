@@ -240,3 +240,59 @@ export async function deleteSystem(systemId) {
     return { error }
   }
 }
+
+// ============ WORK SESSIONS (Mirror feature) ============
+// NOTE for Insights Mode (Prompt 2): limitDays defaults to 30.
+// Pattern detection may need 60–90 days — override at the call site when building Insights.
+
+export async function createWorkSession(userId, sessionData) {
+  try {
+    const data = await databases.createDocument(DB, COL.workSessions, ID_GEN.unique(), {
+      user_id: userId,
+      started_at: sessionData.started_at,
+      ended_at: sessionData.ended_at,
+      duration_min: sessionData.duration_min,
+      task_type: sessionData.task_type,
+      environment: sessionData.environment,
+      energy_in: sessionData.energy_in,
+      quality_out: sessionData.quality_out,
+      was_planned: sessionData.was_planned,
+      was_interrupted: sessionData.was_interrupted,
+      notes: sessionData.notes || null
+    })
+    return { data, error: null }
+  } catch (error) {
+    console.error('Error creating work session:', error)
+    return { data: null, error }
+  }
+}
+
+export async function getWorkSessions(userId, limitDays = 30) {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - limitDays)
+  const cutoffStr = cutoff.toISOString()
+
+  try {
+    const response = await databases.listDocuments(DB, COL.workSessions, [
+      Query.equal('user_id', userId),
+      Query.greaterThanEqual('started_at', cutoffStr),
+      Query.orderDesc('started_at'),
+      Query.limit(200)
+    ])
+    return response.documents
+  } catch (error) {
+    console.error('Error fetching work sessions:', error)
+    return []
+  }
+}
+
+export async function deleteWorkSession(sessionId) {
+  try {
+    await databases.deleteDocument(DB, COL.workSessions, sessionId)
+    return { error: null }
+  } catch (error) {
+    console.error('Error deleting work session:', error)
+    return { error }
+  }
+}
+

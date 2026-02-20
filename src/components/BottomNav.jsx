@@ -1,11 +1,14 @@
 import { motion } from 'framer-motion'
 
 const TABS = [
-  { id: 'dashboard', label: 'Dash', icon: '◉' },
-  { id: 'plan', label: 'Plan', icon: '◫' },
-  { id: 'habits', label: 'Habits', icon: '◇' },
-  { id: 'systems', label: 'Systems', icon: '⚙' },
-  { id: 'profile', label: 'Profile', icon: '◯' }
+  { id: 'dashboard', label: 'Dash',    icon: '◉' },
+  // TODO: Nav architecture debt — spec describes Today/Mirror/Plan/Profile but existing nav
+  // has Dash/Plan/Habits/Systems/Profile. Reconcile when building Insights Mode (Prompt 2).
+  { id: 'mirror',    label: 'Mirror',  icon: '◈' },
+  { id: 'plan',      label: 'Plan',    icon: '◫' },
+  { id: 'habits',    label: 'Habits',  icon: '◇' },
+  { id: 'systems',   label: 'Systems', icon: '⚙' },
+  { id: 'profile',   label: 'Profile', icon: '◯' }
 ]
 
 export default function BottomNav({ activeTab, onTabChange }) {
