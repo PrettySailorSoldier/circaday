@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { account } from '../lib/appwrite'
 import { createWorkSession, getWorkSessions, deleteWorkSession } from '../lib/db'
@@ -31,7 +31,9 @@ const EMPTY_FORM = {
   notes: '',
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+const MIN_SESSIONS = 10          // threshold before showing insights
+
+// ─── Helpers (shared) ─────────────────────────────────────────────────────────
 
 function formatElapsed(seconds) {
   const h = Math.floor(seconds / 3600)
@@ -64,7 +66,155 @@ function getTaskIcon(taskType) {
   return TASK_TYPES.find(t => t.id === taskType)?.icon ?? '◉'
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
+function getEnvLabel(envId) {
+  return ENVIRONMENTS.find(e => e.id === envId)?.label ?? envId
+}
+
+function getEnvIcon(envId) {
+  return ENVIRONMENTS.find(e => e.id === envId)?.icon ?? '◉'
+}
+
+function avg(arr) {
+  if (!arr.length) return 0
+  return arr.reduce((a, b) => a + b, 0) / arr.length
+}
+
+function median(arr) {
+  if (!arr.length) return 0
+  const sorted = [...arr].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function round1(n) {
+  return Math.round(n * 10) / 10
+}
+
+// ─── Insight Computation (useMemo-friendly pure functions) ────────────────────
+
+const TIME_BLOCKS = [
+  { label: '6–9 AM',   start: 6,  end: 9  },
+  { label: '9 AM–12',  start: 9,  end: 12 },
+  { label: '12–3 PM',  start: 12, end: 15 },
+  { label: '3–6 PM',   start: 15, end: 18 },
+  { label: '6–9 PM',   start: 18, end: 21 },
+  { label: '9 PM–12',  start: 21, end: 24 },
+  { label: '12–3 AM',  start: 0,  end: 3  },
+  { label: '3–6 AM',   start: 3,  end: 6  },
+]
+
+function getTimeBlock(hour) {
+  return TIME_BLOCKS.find(b => {
+    if (b.start < b.end) return hour >= b.start && hour < b.end
+    return hour >= b.start || hour < b.end
+  }) ?? TIME_BLOCKS[0]
+}
+
+function computeInsights(sessions) {
+  if (sessions.length < 5) return null
+
+  // ── Card 1: Peak Time ──
+  const blockMap = {}
+  sessions.forEach(s => {
+    const hour = new Date(s.started_at).getHours()
+    const block = getTimeBlock(hour)
+    if (!blockMap[block.label]) blockMap[block.label] = []
+    blockMap[block.label].push(s.quality_out)
+  })
+
+  const blockAvgs = Object.entries(blockMap)
+    .filter(([, qs]) => qs.length >= 2)
+    .map(([label, qs]) => ({ label, avg: avg(qs), count: qs.length }))
+    .sort((a, b) => b.avg - a.avg)
+
+  const peakBlock = blockAvgs[0] ?? null
+
+  // ── Card 2: Real Focus Duration ──
+  const allDurations = sessions.map(s => s.duration_min)
+  const highQualDurations = sessions.filter(s => s.quality_out >= 4).map(s => s.duration_min)
+
+  const medianAll = Math.round(median(allDurations))
+  const medianHigh = highQualDurations.length >= 3 ? Math.round(median(highQualDurations)) : null
+
+  let durationInsight = null
+  if (medianHigh !== null) {
+    if (medianHigh > medianAll + 5) durationInsight = 'Your best work happens in longer sessions.'
+    else if (medianHigh < medianAll - 5) durationInsight = 'Your best work tends to come in shorter bursts.'
+    else durationInsight = 'Session length doesn\'t seem to matter much — both work for you.'
+  }
+
+  // ── Card 3: Pressure Test ──
+  const planned = sessions.filter(s => s.was_planned)
+  const spontaneous = sessions.filter(s => !s.was_planned)
+
+  const plannedAvg = planned.length >= 3 ? round1(avg(planned.map(s => s.quality_out))) : null
+  const spontAvg = spontaneous.length >= 3 ? round1(avg(spontaneous.map(s => s.quality_out))) : null
+
+  let pressureInsight = null
+  if (plannedAvg !== null && spontAvg !== null) {
+    const diff = plannedAvg - spontAvg
+    if (diff > 0.3) pressureInsight = 'Your planned sessions actually tend to go better.'
+    else if (diff < -0.3) pressureInsight = 'Your spontaneous work sessions rate higher — you may thrive with less structure.'
+    else pressureInsight = 'Not much difference — both approaches seem to work for you.'
+  }
+
+  // ── Card 4: Energy Correlation ──
+  const energyGroups = {
+    low:    sessions.filter(s => s.energy_in <= 2),
+    medium: sessions.filter(s => s.energy_in === 3),
+    high:   sessions.filter(s => s.energy_in >= 4),
+  }
+
+  const energyAvgs = {
+    low:    energyGroups.low.length    >= 2 ? round1(avg(energyGroups.low.map(s    => s.quality_out))) : null,
+    medium: energyGroups.medium.length >= 2 ? round1(avg(energyGroups.medium.map(s => s.quality_out))) : null,
+    high:   energyGroups.high.length   >= 2 ? round1(avg(energyGroups.high.map(s   => s.quality_out))) : null,
+  }
+
+  const energyValues = Object.values(energyAvgs).filter(v => v !== null)
+  let energyInsight = null
+  if (energyValues.length >= 2) {
+    const max = Math.max(...energyValues)
+    const min = Math.min(...(energyValues))
+    if (max - min < 0.5) energyInsight = 'Your output quality stays consistent regardless of starting energy.'
+    else if (energyAvgs.high !== null && energyAvgs.high === max) energyInsight = 'Higher starting energy correlates with better output for you.'
+    else if (energyAvgs.low !== null && energyAvgs.low === max) energyInsight = 'Interestingly, your lower-energy sessions rate just as well — or better.'
+    else energyInsight = 'Your output quality varies with energy, but not predictably — worth watching.'
+  }
+
+  // ── Card 5: Best Environment ──
+  const envMap = {}
+  sessions.forEach(s => {
+    if (!envMap[s.environment]) envMap[s.environment] = []
+    envMap[s.environment].push(s.quality_out)
+  })
+
+  const envAvgs = Object.entries(envMap)
+    .filter(([, qs]) => qs.length >= 3)
+    .map(([id, qs]) => ({ id, avg: round1(avg(qs)), count: qs.length }))
+    .sort((a, b) => b.avg - a.avg)
+
+  const bestEnv = envAvgs[0] ?? null
+  const hasEnoughEnvData = envAvgs.length >= 2
+
+  return {
+    peakBlock,
+    blockAvgs,
+    medianAll,
+    medianHigh,
+    durationInsight,
+    plannedAvg,
+    spontAvg,
+    pressureInsight,
+    energyAvgs,
+    energyInsight,
+    bestEnv,
+    hasEnoughEnvData,
+    envAvgs,
+  }
+}
+
+// ─── Sub-components (Log Mode) ─────────────────────────────────────────────────
 
 function DotScale({ value, onChange, max = 5 }) {
   return (
@@ -183,7 +333,6 @@ function SessionCard({ session, onDelete }) {
           <div style={styles.sessionCardTime}>{timeRange}</div>
           <div style={styles.sessionCardDuration}>{formatDuration(session.duration_min)}</div>
         </div>
-        {/* Energy / Quality dots */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', gap: '3px' }}>
             {Array.from({ length: 5 }, (_, i) => (
@@ -212,11 +361,303 @@ function SessionCard({ session, onDelete }) {
   )
 }
 
+// ─── Sub-components (Insights Mode) ───────────────────────────────────────────
+
+function InsightCard({ title, children }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={styles.insightCard}
+    >
+      <p style={styles.insightCardTitle}>{title}</p>
+      {children}
+    </motion.div>
+  )
+}
+
+function InsightText({ children, muted = false }) {
+  return (
+    <p style={{
+      fontFamily: "'Inter', sans-serif",
+      fontSize: muted ? '13px' : '17px',
+      color: muted ? 'var(--text-secondary)' : 'var(--text-primary)',
+      margin: '0 0 6px 0',
+      lineHeight: 1.5,
+    }}>{children}</p>
+  )
+}
+
+function EnergyBar({ label, value, maxValue }) {
+  const pct = maxValue > 0 ? (value / 5) * 100 : 0
+  return (
+    <div style={{ marginBottom: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {label}
+        </span>
+        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '12px', color: 'var(--text-primary)', fontWeight: '500' }}>
+          {value}/5
+        </span>
+      </div>
+      <div style={{ height: 6, borderRadius: 3, backgroundColor: 'var(--border)', overflow: 'hidden' }}>
+        <div style={{
+          height: '100%',
+          width: `${pct}%`,
+          borderRadius: 3,
+          backgroundColor: 'var(--accent)',
+          transition: 'width 0.6s ease',
+        }} />
+      </div>
+    </div>
+  )
+}
+
+// Simple SVG half-circle arc for peak time card
+function TimeArc({ blocks, peakLabel }) {
+  const W = 260
+  const H = 140
+  const cx = W / 2
+  const cy = H - 10
+  const r = 110
+
+  // Place the 8 time blocks along the arc (left to right = earlier to later)
+  const arcBlocks = [
+    '6–9 AM', '9 AM–12', '12–3 PM', '3–6 PM',
+    '6–9 PM', '9 PM–12', '12–3 AM', '3–6 AM',
+  ]
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', margin: '8px auto 4px' }}>
+      {/* Background arc */}
+      <path
+        d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none"
+        stroke="var(--border)"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      {/* Tick marks for each block */}
+      {arcBlocks.map((label, i) => {
+        const angle = Math.PI - (i / (arcBlocks.length - 1)) * Math.PI
+        const x = cx + r * Math.cos(angle)
+        const y = cy - r * Math.sin(angle)
+        const isPeak = label === peakLabel
+        return (
+          <g key={label}>
+            <circle
+              cx={x}
+              cy={y}
+              r={isPeak ? 9 : 5}
+              fill={isPeak ? 'var(--accent)' : 'var(--border)'}
+              style={{ filter: isPeak ? 'drop-shadow(0 0 6px rgba(99,102,241,0.6))' : 'none' }}
+            />
+          </g>
+        )
+      })}
+      {/* Labels at edges */}
+      <text x={cx - r - 4} y={cy + 14} fontSize="9" fill="var(--text-secondary)" textAnchor="middle" fontFamily="Inter, sans-serif">6 AM</text>
+      <text x={cx + r + 4} y={cy + 14} fontSize="9" fill="var(--text-secondary)" textAnchor="middle" fontFamily="Inter, sans-serif">6 AM</text>
+      <text x={cx} y={16} fontSize="9" fill="var(--text-secondary)" textAnchor="middle" fontFamily="Inter, sans-serif">6 PM</text>
+    </svg>
+  )
+}
+
+function InsightsMode({ sessions }) {
+  const insights = useMemo(() => computeInsights(sessions), [sessions])
+
+  // Not enough data state
+  if (sessions.length < MIN_SESSIONS) {
+    const pct = (sessions.length / MIN_SESSIONS) * 100
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        style={styles.emptyInsights}
+      >
+        {/* Circular progress */}
+        <div style={{ position: 'relative', width: 100, height: 100, margin: '0 auto 24px' }}>
+          <svg width="100" height="100" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" strokeWidth="5" />
+            <circle
+              cx="50" cy="50" r="42"
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="5"
+              strokeLinecap="round"
+              strokeDasharray={`${2 * Math.PI * 42}`}
+              strokeDashoffset={`${2 * Math.PI * 42 * (1 - pct / 100)}`}
+              transform="rotate(-90 50 50)"
+              style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+            />
+          </svg>
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <span style={{ fontFamily: "'Fraunces', serif", fontSize: '22px', color: 'var(--text-primary)', lineHeight: 1 }}>
+              {sessions.length}
+            </span>
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '10px', color: 'var(--text-secondary)' }}>
+              / {MIN_SESSIONS}
+            </span>
+          </div>
+        </div>
+
+        <p style={styles.emptyInsightsTitle}>Almost there.</p>
+        <p style={styles.emptyInsightsBody}>
+          The Mirror needs a bit more data before patterns emerge. Keep logging sessions and check back.
+        </p>
+      </motion.div>
+    )
+  }
+
+  // Patterns available — render insight cards
+  return (
+    <div style={{ width: '100%', maxWidth: '480px' }}>
+
+      {/* Card 1 — Peak Time */}
+      {insights.peakBlock && (
+        <InsightCard title="When you're sharpest">
+          <TimeArc blocks={insights.blockAvgs} peakLabel={insights.peakBlock.label} />
+          <InsightText>
+            Your highest-quality work tends to happen in the <strong>{insights.peakBlock.label}</strong> window.
+          </InsightText>
+          <InsightText muted>
+            Average quality: {round1(insights.peakBlock.avg)}/5 across {insights.peakBlock.count} sessions.
+          </InsightText>
+        </InsightCard>
+      )}
+
+      {/* Card 2 — Real Focus Duration */}
+      {insights.medianAll > 0 && (
+        <InsightCard title="How long you actually focus">
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '12px' }}>
+            <div style={styles.durationStat}>
+              <span style={styles.durationStatNumber}>{insights.medianAll}m</span>
+              <span style={styles.durationStatLabel}>All sessions</span>
+            </div>
+            {insights.medianHigh && (
+              <div style={styles.durationStat}>
+                <span style={styles.durationStatNumber}>{insights.medianHigh}m</span>
+                <span style={styles.durationStatLabel}>Best sessions</span>
+              </div>
+            )}
+          </div>
+          {insights.durationInsight && (
+            <InsightText muted>{insights.durationInsight}</InsightText>
+          )}
+        </InsightCard>
+      )}
+
+      {/* Card 3 — Pressure Test */}
+      {(insights.plannedAvg !== null || insights.spontAvg !== null) && (
+        <InsightCard title="Do you work better under pressure?">
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '12px' }}>
+            {insights.plannedAvg !== null && (
+              <div style={styles.durationStat}>
+                <span style={styles.durationStatNumber}>{insights.plannedAvg}/5</span>
+                <span style={styles.durationStatLabel}>Planned</span>
+              </div>
+            )}
+            {insights.spontAvg !== null && (
+              <div style={styles.durationStat}>
+                <span style={styles.durationStatNumber}>{insights.spontAvg}/5</span>
+                <span style={styles.durationStatLabel}>Spontaneous</span>
+              </div>
+            )}
+          </div>
+          {insights.pressureInsight && (
+            <InsightText muted>{insights.pressureInsight}</InsightText>
+          )}
+          {(insights.plannedAvg === null || insights.spontAvg === null) && (
+            <InsightText muted>Log more of both types to see the full picture.</InsightText>
+          )}
+        </InsightCard>
+      )}
+
+      {/* Card 4 — Energy Correlation */}
+      {Object.values(insights.energyAvgs).some(v => v !== null) && (
+        <InsightCard title="Does starting energy matter?">
+          {insights.energyAvgs.low    !== null && <EnergyBar label="Low energy (1–2)"   value={insights.energyAvgs.low}    maxValue={5} />}
+          {insights.energyAvgs.medium !== null && <EnergyBar label="Medium energy (3)"  value={insights.energyAvgs.medium} maxValue={5} />}
+          {insights.energyAvgs.high   !== null && <EnergyBar label="High energy (4–5)"  value={insights.energyAvgs.high}   maxValue={5} />}
+          {insights.energyInsight && (
+            <InsightText muted style={{ marginTop: '8px' }}>{insights.energyInsight}</InsightText>
+          )}
+        </InsightCard>
+      )}
+
+      {/* Card 5 — Best Environment */}
+      {(insights.bestEnv || insights.envAvgs.length > 0) && (
+        <InsightCard title="Where you do your best work">
+          {insights.bestEnv && insights.hasEnoughEnvData ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                <span style={{ fontSize: '32px' }}>{getEnvIcon(insights.bestEnv.id)}</span>
+                <div>
+                  <p style={{ ...styles.durationStatNumber, margin: 0, fontSize: '18px' }}>
+                    {getEnvLabel(insights.bestEnv.id)}
+                  </p>
+                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
+                    {insights.bestEnv.avg}/5 average quality
+                  </p>
+                </div>
+              </div>
+              <InsightText muted>Based on {insights.bestEnv.count} sessions in this environment.</InsightText>
+            </>
+          ) : (
+            <>
+              {insights.envAvgs.map(e => (
+                <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '13px', color: 'var(--text-primary)' }}>
+                    {getEnvIcon(e.id)} {getEnvLabel(e.id)}
+                  </span>
+                  <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {e.avg}/5 ({e.count} sessions)
+                  </span>
+                </div>
+              ))}
+              <InsightText muted>Log more sessions per environment to see a clearer winner.</InsightText>
+            </>
+          )}
+        </InsightCard>
+      )}
+
+    </div>
+  )
+}
+
+// ─── Mode Toggle ───────────────────────────────────────────────────────────────
+
+function ModeToggle({ mode, onChange }) {
+  return (
+    <div style={styles.modeToggle}>
+      {['log', 'insights'].map(m => (
+        <button
+          key={m}
+          onClick={() => onChange(m)}
+          style={{
+            ...styles.modeToggleBtn,
+            backgroundColor: mode === m ? 'var(--accent)' : 'transparent',
+            color: mode === m ? 'white' : 'var(--text-secondary)',
+            fontWeight: mode === m ? '500' : '400',
+          }}
+        >
+          {m === 'log' ? 'Log' : 'Insights'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function MirrorTab() {
   const [userId, setUserId] = useState(null)
   const [sessions, setSessions] = useState([])
+  const [mode, setMode] = useState('log')                 // 'log' | 'insights'
   const [activeSession, setActiveSession] = useState(null) // { startTime: Date }
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [showLogForm, setShowLogForm] = useState(false)
@@ -224,7 +665,6 @@ export default function MirrorTab() {
   const [saving, setSaving] = useState(false)
   const intervalRef = useRef(null)
 
-  // Load user + today's sessions on mount
   useEffect(() => {
     async function init() {
       try {
@@ -239,7 +679,6 @@ export default function MirrorTab() {
     init()
   }, [])
 
-  // Timer while session is active
   useEffect(() => {
     if (activeSession) {
       intervalRef.current = setInterval(() => {
@@ -289,7 +728,6 @@ export default function MirrorTab() {
 
     const { error } = await createWorkSession(userId, payload)
     if (!error) {
-      // Refresh session list
       const updated = await getWorkSessions(userId, 30)
       setSessions(updated)
     } else {
@@ -312,7 +750,7 @@ export default function MirrorTab() {
     ? Math.round((Date.now() - activeSession.startTime.getTime()) / 60000)
     : 0
 
-  // ── STATE 2: ACTIVE SESSION ──────────────────────────────────────────────────
+  // ── Active session screen — full display regardless of mode ──────────────────
   if (activeSession && !showLogForm) {
     return (
       <div style={styles.container}>
@@ -342,51 +780,77 @@ export default function MirrorTab() {
     )
   }
 
-  // ── STATE 1 + 3: IDLE (with optional log form overlay) ──────────────────────
+  // ── Normal view (Log or Insights) ────────────────────────────────────────────
   return (
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
         <h2 style={styles.title}>The Mirror</h2>
-        <p style={styles.subtitle}>Log what you actually did.</p>
       </div>
 
-      {/* Start button */}
-      <motion.button
-        style={styles.startBtn}
-        onClick={handleStart}
-        whileTap={{ scale: 0.97 }}
-        whileHover={{ boxShadow: '0 0 24px rgba(99,102,241,0.35)' }}
-      >
-        Start Session
-      </motion.button>
+      {/* Mode Toggle */}
+      <ModeToggle mode={mode} onChange={setMode} />
 
-      {/* Today's sessions */}
-      <div style={styles.sessionList}>
-        <p style={styles.sectionLabel}>TODAY</p>
-        <AnimatePresence>
-          {todaySessions.length === 0 ? (
-            <motion.p
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              style={styles.emptyState}
+      {/* Animated content switch */}
+      <AnimatePresence mode="wait">
+        {mode === 'log' ? (
+          <motion.div
+            key="log"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+          >
+            {/* Start button */}
+            <motion.button
+              style={styles.startBtn}
+              onClick={handleStart}
+              whileTap={{ scale: 0.97 }}
+              whileHover={{ boxShadow: '0 0 24px rgba(99,102,241,0.35)' }}
             >
-              Nothing logged yet today.
-            </motion.p>
-          ) : (
-            todaySessions.map(s => (
-              <SessionCard key={s.$id} session={s} onDelete={handleDelete} />
-            ))
-          )}
-        </AnimatePresence>
-      </div>
+              Start Session
+            </motion.button>
 
-      {/* ── STATE 3: LOG FORM BOTTOM SHEET ── */}
+            {/* Today's sessions */}
+            <div style={styles.sessionList}>
+              <p style={styles.sectionLabel}>TODAY</p>
+              <AnimatePresence>
+                {todaySessions.length === 0 ? (
+                  <motion.p
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    style={styles.emptyState}
+                  >
+                    Nothing logged yet today.
+                  </motion.p>
+                ) : (
+                  todaySessions.map(s => (
+                    <SessionCard key={s.$id} session={s} onDelete={handleDelete} />
+                  ))
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="insights"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+          >
+            <InsightsMode sessions={sessions} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Log form bottom sheet — stays above both modes */}
       <AnimatePresence>
         {showLogForm && (
           <>
-            {/* Backdrop */}
             <motion.div
               key="backdrop"
               initial={{ opacity: 0 }}
@@ -396,7 +860,6 @@ export default function MirrorTab() {
               onClick={handleDiscard}
             />
 
-            {/* Sheet */}
             <motion.div
               key="sheet"
               initial={{ y: '100%' }}
@@ -405,11 +868,9 @@ export default function MirrorTab() {
               transition={{ type: 'spring', stiffness: 380, damping: 38 }}
               style={styles.sheet}
             >
-              {/* Duration header */}
               <div style={styles.sheetHandle} />
               <p style={styles.durationLabel}>{formatDuration(durationMin)}</p>
 
-              {/* Task type */}
               <div style={styles.formSection}>
                 <p style={styles.formSectionLabel}>What were you doing?</p>
                 <IconGrid
@@ -419,7 +880,6 @@ export default function MirrorTab() {
                 />
               </div>
 
-              {/* Environment */}
               <div style={styles.formSection}>
                 <p style={styles.formSectionLabel}>Environment?</p>
                 <IconGrid
@@ -429,7 +889,6 @@ export default function MirrorTab() {
                 />
               </div>
 
-              {/* Energy in */}
               <div style={styles.formSection}>
                 <p style={styles.formSectionLabel}>How were you going in?</p>
                 <DotScale
@@ -438,7 +897,6 @@ export default function MirrorTab() {
                 />
               </div>
 
-              {/* Quality out */}
               <div style={styles.formSection}>
                 <p style={styles.formSectionLabel}>How did it go?</p>
                 <DotScale
@@ -447,7 +905,6 @@ export default function MirrorTab() {
                 />
               </div>
 
-              {/* Toggles */}
               <div style={styles.toggleSection}>
                 <SmallToggle
                   label="Was this planned?"
@@ -461,7 +918,6 @@ export default function MirrorTab() {
                 />
               </div>
 
-              {/* Notes */}
               <input
                 type="text"
                 maxLength={200}
@@ -471,7 +927,6 @@ export default function MirrorTab() {
                 style={styles.notesInput}
               />
 
-              {/* Actions */}
               <div style={styles.sheetActions}>
                 <motion.button
                   style={{
@@ -513,7 +968,7 @@ const styles = {
   },
   header: {
     textAlign: 'center',
-    marginBottom: '32px',
+    marginBottom: '20px',
     width: '100%',
   },
   title: {
@@ -521,15 +976,28 @@ const styles = {
     fontSize: '26px',
     fontWeight: '500',
     color: 'var(--text-primary)',
-    margin: '0 0 6px 0',
-  },
-  subtitle: {
-    fontFamily: "'Inter', sans-serif",
-    fontSize: '13px',
-    color: 'var(--text-secondary)',
     margin: 0,
+  },
+  // Mode toggle
+  modeToggle: {
+    display: 'flex',
+    backgroundColor: 'var(--bg-elevated)',
+    borderRadius: '999px',
+    padding: '3px',
+    marginBottom: '28px',
+    border: '1px solid var(--border)',
+  },
+  modeToggleBtn: {
+    borderRadius: '999px',
+    border: 'none',
+    padding: '8px 24px',
+    fontFamily: "'Inter', sans-serif",
+    fontSize: '14px',
+    cursor: 'pointer',
+    transition: 'all 0.18s ease',
     letterSpacing: '0.01em',
   },
+  // Log Mode
   startBtn: {
     backgroundColor: 'var(--accent)',
     color: 'white',
@@ -597,7 +1065,7 @@ const styles = {
     opacity: 0.4,
     flexShrink: 0,
   },
-  // Active session (timer screen)
+  // Active session / timer
   timerScreen: {
     display: 'flex',
     flexDirection: 'column',
@@ -732,5 +1200,69 @@ const styles = {
     fontFamily: "'Inter', sans-serif",
     fontSize: '16px',
     cursor: 'pointer',
+  },
+  // Insights Mode
+  insightCard: {
+    backgroundColor: 'var(--bg-elevated)',
+    borderRadius: '16px',
+    padding: '20px',
+    marginBottom: '16px',
+    borderLeft: '3px solid var(--accent)',
+    border: '1px solid var(--border)',
+    borderLeftWidth: '3px',
+    borderLeftColor: 'var(--accent)',
+    width: '100%',
+    boxSizing: 'border-box',
+  },
+  insightCardTitle: {
+    fontFamily: "'Inter', sans-serif",
+    fontSize: '11px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: 'var(--text-secondary)',
+    margin: '0 0 12px 0',
+    fontWeight: '500',
+  },
+  durationStat: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: '10px',
+    padding: '12px',
+    alignItems: 'center',
+  },
+  durationStatNumber: {
+    fontFamily: "'Fraunces', serif",
+    fontSize: '26px',
+    fontWeight: '400',
+    color: 'var(--text-primary)',
+    margin: 0,
+  },
+  durationStatLabel: {
+    fontFamily: "'Inter', sans-serif",
+    fontSize: '11px',
+    color: 'var(--text-secondary)',
+  },
+  // Empty insights state
+  emptyInsights: {
+    textAlign: 'center',
+    padding: '24px 0',
+    maxWidth: '320px',
+  },
+  emptyInsightsTitle: {
+    fontFamily: "'Fraunces', serif",
+    fontSize: '22px',
+    color: 'var(--text-primary)',
+    margin: '0 0 12px 0',
+    fontWeight: '400',
+  },
+  emptyInsightsBody: {
+    fontFamily: "'Inter', sans-serif",
+    fontSize: '15px',
+    color: 'var(--text-secondary)',
+    lineHeight: 1.6,
+    margin: 0,
   },
 }
