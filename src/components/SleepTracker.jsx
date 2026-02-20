@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { account } from '../lib/appwrite'
-import { createSleepLog, getSleepLogs, updateSleepLog, calculateChronotype } from '../lib/db'
+import { createSleepLog, getSleepLogs, updateSleepLog, calculateChronotype, formatDuration } from '../lib/db'
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -44,16 +44,6 @@ function formatHM(h, m) {
   return `${h12}:${pad2(m)} ${suffix}`
 }
 
-function calculateSleepDuration(bedtimeH, bedtimeM, wakeH, wakeM) {
-  let bedMins = bedtimeH * 60 + bedtimeM
-  let wakeMins = wakeH * 60 + wakeM
-  if (bedMins > wakeMins) wakeMins += 24 * 60
-  const totalMins = wakeMins - bedMins
-  const h = Math.floor(totalMins / 60)
-  const m = totalMins % 60
-  if (h === 0) return `${m}m`
-  return m === 0 ? `${h}h` : `${h}h ${m}m`
-}
 
 function qualityColor(q) {
   if (q >= 4) return 'var(--accent)'
@@ -327,10 +317,9 @@ export default function SleepTracker({ currentArchetypeId, onChronotypeUpdate })
 
   // ── STATE 3: Logged today ─────────────────────────────────────────────────────
   if (todayLog && !showForm) {
-    const duration = calculateSleepDuration(
-      ...todayLog.bedtime.split(':').map(Number),
-      ...todayLog.wake_time.split(':').map(Number)
-    )
+    const duration = todayLog.duration_min 
+      ? formatDuration(todayLog.duration_min)
+      : '—'
 
     return (
       <div style={styles.section}>
@@ -439,7 +428,11 @@ export default function SleepTracker({ currentArchetypeId, onChronotypeUpdate })
                 onMinuteChange={v => setFormData(f => ({ ...f, wakeM: v }))}
               />
               <p style={styles.durationHint}>
-                {calculateSleepDuration(formData.bedtimeH, formData.bedtimeM, formData.wakeH, formData.wakeM)} of sleep
+                {formatDuration((() => {
+                  const b = formData.bedtimeH * 60 + formData.bedtimeM
+                  const w = formData.wakeH * 60 + formData.wakeM
+                  return (w < b ? w + 1440 : w) - b
+                })())} of sleep
               </p>
             </FormField>
 

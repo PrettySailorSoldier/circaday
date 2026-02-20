@@ -334,3 +334,56 @@ Only log one entry per calendar day. If today already has a log, go straight to 
 Those three prompts are fully self-contained — Antigravity can execute each one independently. Run them in order since Prompt 2 depends on the sessions data structure from Prompt 1, and Prompt 3 is standalone but references the profile tab.
 
 Want me to write Prompt 4 next — the Initiation Support feature (the "push the boulder" moment, which based on your assessment is the single highest-value thing Circaday can do for you specifically)?
+
+---
+
+### PROMPT 4 — Initiation Support: The Momentum Tool
+
+```
+I need to build the "Initiation Support" feature for Circaday — this is the "Momentum Tool" designed to help neurodivergent users overcome task paralysis (the "Waiting Mode" or "Boulder" problem).
+
+CONTEXT:
+For many neurodivergent users, starting a task is the hardest part. The Momentum Tool is a psychological "wedge" designed to make starting as low-friction as possible. It focuses on the first tiny step and a 5-minute commitment.
+
+TECH STACK: React 18, Framer Motion, inline JS styles, dark theme CSS variables.
+
+---
+
+TASK: Create the Momentum Tool component and integrate it into the Dashboard.
+
+PART 1 — MOMENTUM TOOL UI (create src/components/MomentumTool.jsx)
+
+This is a full-screen or large-modal overlay that guides the user through initiation.
+
+STATES:
+
+STATE 1 — THE HOOK:
+- Title: "Let's push the boulder."
+- Input: "What are we starting?" (placeholder: "The big scary thing...")
+- Button: "Next"
+
+STATE 2 — THE WEDGE:
+- Title: "Make it tiny."
+- Subtitle: "What is the absolute first physical action? (e.g., 'Open the file', 'Stand up')"
+- Input: "First step..."
+- Button: "I'm ready"
+
+STATE 3 — THE PUSH (5-minute timer):
+- Show the first step in large text: "FIRST STEP: [First Step]"
+- A large 5-minute countdown timer (05:00)
+- A "Done!" button (if they finish the step early)
+- A "Quit" button (low prominence)
+- Visual: A progress ring that fills slowly over 5 minutes.
+
+STATE 4 — THE VICTORY:
+- Title: "Momentum achieved."
+- Subtitle: "You've broken the seal. The hardest part is over."
+- Option A: "Keep going (Start Work Session)" — This should trigger the existing createWorkSession logic or transition them to the Mirror timer.
+- Option B: "Take the win & stop" — Closes the tool.
+
+PART 2 — INTEGRATION (Update src/App.jsx)
+
+- Add a 🚀 "Momentum" button to the Dashboard (near the Guided Session button).
+- When clicked, it opens the MomentumTool overlay.
+- Ensure the state transition from Momentum Victory to a regular Work Session is seamless.
+```

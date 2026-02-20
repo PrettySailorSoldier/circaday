@@ -1,5 +1,35 @@
 import { databases, account, DB, COL, ID_GEN, Query } from './appwrite'
 
+// ============ HELPERS ============
+
+/**
+ * Calculates duration in minutes between two HH:MM strings.
+ * Handles midnight crossing (e.g., 23:00 to 07:00 = 480 mins).
+ */
+export function calculateDuration(startTime: string, endTime: string): number {
+  const [startH, startM] = startTime.split(':').map(Number)
+  const [endH, endM] = endTime.split(':').map(Number)
+  
+  let startTotal = startH * 60 + startM
+  let endTotal = endH * 60 + endM
+  
+  if (startTotal > endTotal) {
+    endTotal += 24 * 60
+  }
+  
+  return endTotal - startTotal
+}
+
+/**
+ * Formats minutes into "7h 15m" or similar.
+ */
+export function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
 // ============ AUTH HELPERS ============
 
 export async function getCurrentUser() {
@@ -22,11 +52,13 @@ export async function signOut() {
 
 // ─── Sleep Logs ───────────────────────────────────────────────────────────────
 
-export async function createSleepLog(userId, logData) {
+export async function createSleepLog(userId: string, logData: any) {
   try {
-    const data = await databases.createDocument(DB, COL.sleepLogs, ID_GEN.unique(), {
+    const duration_min = calculateDuration(logData.bedtime, logData.wake_time)
+    const data = await databases.createDocument(DB as string, COL.sleepLogs as string, ID_GEN.unique(), {
       user_id: userId,
       ...logData,
+      duration_min,
     })
     return { data, error: null }
   } catch (error) {
@@ -53,9 +85,13 @@ export async function getSleepLogs(userId, limitDays = 30) {
   }
 }
 
-export async function updateSleepLog(logId, updates) {
+export async function updateSleepLog(logId: string, updates: any) {
   try {
-    const data = await databases.updateDocument(DB, COL.sleepLogs, logId, updates)
+    const payload = { ...updates }
+    if (updates.bedtime && updates.wake_time) {
+      payload.duration_min = calculateDuration(updates.bedtime, updates.wake_time)
+    }
+    const data = await databases.updateDocument(DB as string, COL.sleepLogs as string, logId, payload)
     return { data, error: null }
   } catch (error) {
     console.error('Error updating sleep log:', error)
