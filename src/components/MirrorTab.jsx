@@ -654,7 +654,7 @@ function ModeToggle({ mode, onChange }) {
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
-export default function MirrorTab() {
+export default function MirrorTab({ initialActiveSession, onClearTrigger }) {
   const [userId, setUserId] = useState(null)
   const [sessions, setSessions] = useState([])
   const [mode, setMode] = useState('log')                 // 'log' | 'insights'
@@ -672,12 +672,22 @@ export default function MirrorTab() {
         setUserId(user.$id)
         const data = await getWorkSessions(user.$id, 30)
         setSessions(data)
+
+        // Handle momentum trigger
+        if (initialActiveSession && !activeSession) {
+          setActiveSession({ startTime: initialActiveSession.startTime })
+          setFormData(prev => ({
+            ...prev,
+            notes: `Momentum win: ${initialActiveSession.goal} (${initialActiveSession.firstStep})`
+          }))
+          if (onClearTrigger) onClearTrigger()
+        }
       } catch (e) {
         console.error('MirrorTab init error:', e)
       }
     }
     init()
-  }, [])
+  }, [initialActiveSession])
 
   useEffect(() => {
     if (activeSession) {

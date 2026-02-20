@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { account } from './lib/appwrite'
 import { getProfile, updateProfile } from './lib/db'
@@ -14,10 +15,11 @@ import BottomNav from './components/BottomNav'
 import DaySchedule from './components/DaySchedule'
 import MirrorTab from './components/MirrorTab'
 import SleepTracker from './components/SleepTracker'
+import MomentumTool from './components/MomentumTool'
 import { useArchetype } from './hooks/useArchetype'
 import { useCurrentPhase } from './hooks/useCurrentPhase'
 
-function Dashboard({ archetype, profile, isSessionActive, onStartSession, onEndSession }) {
+function Dashboard({ archetype, profile, isSessionActive, onStartSession, onEndSession, onOpenMomentum }) {
   const now = new Date()
   const currentHour = now.getHours()
   const currentMinute = now.getMinutes()
@@ -46,7 +48,7 @@ function Dashboard({ archetype, profile, isSessionActive, onStartSession, onEndS
           onEndSession={onEndSession} 
         />
       ) : (
-        <>
+        <div style={{ width: '100%', maxWidth: '280px', display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' }}>
           {currentPhase && <PhaseCard phase={currentPhase} />}
           <button 
             style={styles.startSessionBtn}
@@ -57,7 +59,14 @@ function Dashboard({ archetype, profile, isSessionActive, onStartSession, onEndS
           >
             Start Guided Session
           </button>
-        </>
+          
+          <button 
+            style={styles.momentumBtn}
+            onClick={onOpenMomentum}
+          >
+            🚀 Momentum
+          </button>
+        </div>
       )}
     </div>
   )
@@ -77,6 +86,10 @@ function MainApp() {
   // Session State Lifted
   const [isSessionActive, setIsSessionActive] = useState(false)
   const [sessionData, setSessionData] = useState(null)
+  
+  // Momentum State
+  const [showMomentum, setShowMomentum] = useState(false)
+  const [workSessionTrigger, setWorkSessionTrigger] = useState(null)
 
   const handleStartSession = (data) => {
     setSessionData(data)
@@ -86,6 +99,12 @@ function MainApp() {
   const handleEndSession = () => {
     setIsSessionActive(false)
     setSessionData(null)
+  }
+
+  const handleMomentumVictory = (data) => {
+    setShowMomentum(false)
+    setWorkSessionTrigger({ startTime: new Date(), ...data })
+    setActiveTab('mirror')
   }
 
   async function handleChronotypeUpdate(newChronotype) {
@@ -107,6 +126,15 @@ function MainApp() {
 
   return (
     <div style={styles.appContainer}>
+      <AnimatePresence>
+        {showMomentum && (
+          <MomentumTool 
+            onClose={() => setShowMomentum(false)} 
+            onStartWorkSession={handleMomentumVictory}
+          />
+        )}
+      </AnimatePresence>
+
       <div style={styles.mainContent}>
         {activeTab === 'dashboard' && (
           <Dashboard 
@@ -115,9 +143,15 @@ function MainApp() {
             isSessionActive={isSessionActive}
             onStartSession={handleStartSession}
             onEndSession={handleEndSession}
+            onOpenMomentum={() => setShowMomentum(true)}
           />
         )}
-        {activeTab === 'mirror' && <MirrorTab />}
+        {activeTab === 'mirror' && (
+          <MirrorTab 
+            initialActiveSession={workSessionTrigger} 
+            onClearTrigger={() => setWorkSessionTrigger(null)} 
+          />
+        )}
         {activeTab === 'plan' && <PlanTab />}
         {activeTab === 'habits' && <HabitsTab />}
         {activeTab === 'systems' && <SystemsTab />}
@@ -264,7 +298,6 @@ const styles = {
     margin: 0
   },
   startSessionBtn: {
-    marginTop: '24px',
     backgroundColor: 'var(--accent)',
     color: 'white',
     border: 'none',
@@ -277,6 +310,20 @@ const styles = {
     width: '100%',
     maxWidth: '280px',
     boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)'
+  },
+  momentumBtn: {
+    backgroundColor: 'var(--bg-elevated)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border)',
+    borderRadius: '12px',
+    padding: '16px 32px',
+    fontFamily: "'Inter', sans-serif",
+    fontSize: '16px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    width: '100%',
+    maxWidth: '280px',
+    transition: 'all 0.2s ease'
   },
   activeSessionCard: {
     marginTop: '24px',
