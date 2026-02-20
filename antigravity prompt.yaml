@@ -1,0 +1,399 @@
+I'm adding a comprehensive multi-dimensional assessment to Circaday — a React + Appwrite PWA for neurodivergent users. This replaces/extends the existing 5-question QuizFlow and produces a rich profile that powers the entire app experience.
+
+TECH STACK:
+- React 18 + Vite (plain JSX, no TypeScript)
+- Appwrite backend (configured in src/lib/appwrite.js and src/lib/db.js)
+- Framer Motion for animations
+- React Router for navigation
+- Inline JS styles ONLY — no CSS files, no Tailwind, no CSS modules
+- Dark theme with CSS variables: --bg-primary, --bg-elevated, --text-primary, --text-secondary, --border, --accent (violet/indigo)
+- Fonts: 'Fraunces' (serif, for headers/display) and 'Inter' (sans-serif, for body)
+
+EXISTING STRUCTURE:
+- src/components/QuizFlow.jsx — the current 5-question quiz (we are REPLACING this)
+- src/data/archetypes.js — 16 archetypes keyed by modifier_chronotype (e.g. wandering_wolf)
+- calculateArchetype(answers) lives in archetypes.js, takes array of { questionId, answerId }
+- src/components/ProfileReveal.jsx — shows archetype result after quiz
+- src/lib/db.js — all Appwrite calls including updateProfile(userId, archetypeId, quizAnswers)
+- The profile Appwrite document stores: archetype_id, quiz_answers (JSON string), and we will add new dimensional score fields
+
+EXISTING ARCHETYPES (do not change these):
+16 archetypes = 4 chronotypes (lion/bear/wolf/dolphin) × 4 modifiers (novelty_seeking/deep_diving/precision/wandering)
+calculateArchetype() maps answers.chronotype + answers.energy → base type, answers.procrastination → modifier
+
+---
+
+TASK: Build a full multi-dimensional assessment that replaces QuizFlow.jsx and produces a dimensional profile stored in Appwrite, then displayed in a rich ProfileReveal/Profile tab experience.
+
+---
+
+## PART 1 — APPWRITE SCHEMA ADDITIONS
+
+Add these attributes to the existing `profiles` collection (output as a reference table I can add manually in Appwrite console):
+
+| Attribute Key | Type | Required | Notes |
+|---|---|---|---|
+| chronotype_score | Integer | No | 0–100, higher = more Wolf/evening |
+| productivity_style | String | No | prioritizer / planner / arranger / visualizer |
+| procrastination_type | String | No | perfectionist / thrill_seeker / overwhelmed / interest_blocked / anxious / rebellious |
+| habit_tendency | String | No | upholder / questioner / obliger / rebel |
+| social_jetlag | Integer | No | Estimated minutes of social jetlag |
+| demand_avoidance | Integer | No | 0–10 scale |
+| initiation_difficulty | Integer | No | 0–10 scale |
+| hyperfocus_tendency | Integer | No | 0–10 scale |
+| sensory_sensitivity | Integer | No | 0–10 scale |
+| structure_preference | String | No | rigid / thematic / fluid |
+
+---
+
+## PART 2 — NEW QUIZ DATA (src/data/questions.js)
+
+Create this file. It replaces the hardcoded questions in QuizFlow. Structure each question as:
+{
+  id: string,
+  dimension: string, // which dimension this informs
+  question: string,
+  subtext: string, // optional clarification, keep it brief and warm
+  format: 'single_select' | 'slider' | 'scale_5',
+  options: [...] // for single_select
+  sliderMin: string, sliderMax: string // for slider
+}
+
+IMPLEMENT THESE EXACT QUESTIONS in order:
+
+SECTION 1 — CHRONOTYPE (5 questions, ids: chrono_1 through chrono_5)
+
+chrono_1:
+Question: "On a completely free day with no obligations, what time would you naturally wake up?"
+Format: single_select
+Options:
+  A: Before 6 AM → value: 1
+  B: 6–7:30 AM → value: 2
+  C: 7:30–9 AM → value: 3
+  D: 9–10:30 AM → value: 4
+  E: After 10:30 AM → value: 5
+
+chrono_2:
+Question: "When do you feel most mentally sharp?"
+Format: single_select
+Options:
+  A: Early morning (before 9 AM) → value: 1
+  B: Late morning (9 AM–noon) → value: 2
+  C: Afternoon (noon–5 PM) → value: 3
+  D: Evening (5–9 PM) → value: 4
+  E: Late night (after 9 PM) → value: 5
+
+chrono_3:
+Question: "If you had to do your hardest mental work, when would you choose?"
+Format: single_select
+Options:
+  A: Early morning → value: 1
+  B: Mid-morning → value: 2
+  C: Afternoon → value: 3
+  D: Evening → value: 4
+  E: Late night → value: 5
+
+chrono_4:
+Question: "How difficult is it for you to function in the early morning?"
+Subtext: "Think about your actual experience, not what you wish were true."
+Format: slider (1 = Not at all difficult, 5 = Extremely difficult)
+
+chrono_5:
+Question: "On a typical work or school day vs. a free day, how different are your sleep times?"
+Subtext: "This helps us spot if your schedule and your biology are fighting each other."
+Format: single_select
+Options:
+  A: Pretty similar (less than 1 hour difference) → social_jetlag: 0
+  B: Somewhat different (1–2 hours) → social_jetlag: 60
+  C: Noticeably different (2–3 hours) → social_jetlag: 150
+  D: Very different (3+ hours) → social_jetlag: 210
+
+SECTION 2 — PRODUCTIVITY STYLE (4 questions, ids: prod_1 through prod_4)
+
+prod_1:
+Question: "You have a big project to start. What do you do first?"
+Format: single_select
+Options:
+  A: Define the goal and highest-value outcome → prioritizer
+  B: Map out a step-by-step plan → planner
+  C: Think about who needs to be involved → arranger
+  D: Try to understand the big picture first → visualizer
+
+prod_2:
+Question: "Does having a meeting scheduled later in the day make it hard to focus before it?"
+Subtext: "Even if the meeting is hours away."
+Format: single_select
+Options:
+  A: Yes, it fragments my whole day → maker_schedule
+  B: Not really, I just note it and keep working → manager_schedule
+  C: Only if it's something I'm anxious about → anxiety_related
+  D: I forget about it until right before → time_blindness
+
+prod_3:
+Question: "Do you produce better work under deadline pressure, or does pressure make you anxious?"
+Format: single_select
+Options:
+  A: Definitely better — I need the urgency → sprinter
+  B: Worse — pressure makes me freeze or spiral → marathoner
+  C: Better in the moment but I regret waiting → mixed
+  D: It depends entirely on whether I care about the task → interest_based
+
+prod_4:
+Question: "When something unexpected disrupts your plan, what's your gut reaction?"
+Subtext: "Not what you think you should feel — what you actually feel."
+Format: single_select
+Options:
+  A: Significant distress, hard to recover → structured_high
+  B: Mild frustration, I adapt fairly quickly → structured_moderate
+  C: Honestly kind of relieved — a reason to pivot → fluid
+  D: Both: I hate it AND I secretly welcome it → audhd_signal
+
+SECTION 3 — PROCRASTINATION TYPE (4 questions, ids: proc_1 through proc_4)
+
+proc_1:
+Question: "You have an important project due in two weeks. What most likely happens?"
+Format: single_select
+Options:
+  A: I start right away but keep revising endlessly → perfectionist
+  B: I feel weirdly energized as the deadline gets close → thrill_seeker
+  C: I think about starting constantly but feel too overwhelmed to begin → overwhelmed
+  D: I forget about it until something reminds me → interest_blocked
+  E: I feel anxious every time I think about it → anxious
+  F: I resent that I have to do it at all → rebellious
+
+proc_2:
+Question: "My motivation depends on whether I find something interesting, not on how important it is."
+Subtext: "Answer honestly — there's no wrong answer here."
+Format: scale_5 (1 = Strongly disagree, 5 = Strongly agree)
+// High score → interest_blocked / ADHD signal
+
+proc_3:
+Question: "I avoid tasks because I'm afraid the result won't be good enough."
+Format: scale_5 (1 = Strongly disagree, 5 = Strongly agree)
+// High score → perfectionist signal
+
+proc_4:
+Question: "Being told I 'have to' do something makes me want to do it less — even if I chose it myself."
+Format: scale_5 (1 = Strongly disagree, 5 = Strongly agree)
+// High score → demand avoidance signal
+
+SECTION 4 — HABIT TENDENCY (3 questions, ids: habit_1 through habit_3)
+
+habit_1:
+Question: "Have you ever kept a habit or resolution that only YOU knew about — no one checking on you?"
+Format: single_select
+Options:
+  A: Yes, easily — I do what I set out to do → upholder
+  B: Sometimes, if I'm completely convinced it's worth it → questioner
+  C: Rarely — I need someone else to know or I lose momentum → obliger
+  D: The concept of keeping a resolution feels like a trap → rebel
+
+habit_2:
+Question: "When asked to do something you think is pointless, what do you do?"
+Format: single_select
+Options:
+  A: Do it anyway — it's expected → upholder
+  B: Ask why and push back if the answer isn't satisfying → questioner
+  C: Do it to avoid conflict, and quietly resent it → obliger
+  D: Find a way around it, or just don't do it → rebel
+
+habit_3:
+Question: "What usually happens when you try a new productivity system?"
+Format: single_select
+Options:
+  A: I use it consistently for months → upholder / planner
+  B: I'm really excited at first, then stop using it within a few weeks → novelty / adhd
+  C: I use it sometimes and sometimes forget → inconsistent
+  D: I've never found one that actually works for my brain → system_failure
+
+SECTION 5 — NEURODIVERGENT PATTERNS (4 questions, ids: nd_1 through nd_4)
+
+nd_1:
+Question: "How often do you lose track of time without realizing it?"
+Subtext: "Starting a task and suddenly it's been 3 hours."
+Format: slider (1 = Never, 5 = Constantly)
+// High score → time_blindness / hyperfocus_tendency
+
+nd_2:
+Question: "When you're deeply absorbed in something interesting, how hard is it to stop?"
+Format: slider (1 = Easy to stop, 5 = Nearly impossible)
+// High score → hyperfocus_tendency
+
+nd_3:
+Question: "How sensitive are you to your environment — noise, light, temperature, textures?"
+Format: slider (1 = Not sensitive, 5 = Very sensitive)
+// sensory_sensitivity score
+
+nd_4:
+Question: "What environment do you actually work best in?"
+Format: single_select
+Options:
+  A: Very quiet and calm
+  B: Specific background sounds (music, white noise)
+  C: Content audio — podcasts, videos, something to listen to
+  D: Some activity and buzz around me
+  E: It changes completely depending on my mood or task
+
+---
+
+## PART 3 — SCORING ENGINE (src/lib/scoring.js)
+
+Create this file. It takes the raw answers array and returns a scored profile object.
+
+CHRONOTYPE SCORE (0–100, higher = more evening/wolf):
+- chrono_1 through chrono_3: map option values 1–5, average them, normalize to 0–100
+- chrono_4 (slider 1–5): add to evening score (higher difficulty = more evening-leaning)
+- Final chronotype_score = weighted average
+
+CHRONOTYPE CLASSIFICATION (for calculateArchetype compatibility):
+- 0–30 → lion (answerId: 'A')
+- 31–50 → bear (answerId: 'B')  
+- 51–75 → wolf (answerId: 'C')
+- 76–100 → dolphin (answerId: 'D')
+
+SOCIAL JETLAG: Pull directly from chrono_5 option value (in minutes)
+
+PRODUCTIVITY STYLE: Most common answer across prod_1–prod_4 (prioritizer/planner/arranger/visualizer take priority from prod_1; maker/sprinter signals are secondary flags)
+
+PROCRASTINATION TYPE:
+- proc_1 answer is primary classification
+- proc_2 >= 4 overrides or co-labels as interest_blocked
+- proc_3 >= 4 co-labels perfectionist
+- proc_4 >= 4 adds demand_avoidance flag (score = proc_4 value × 2, capped at 10)
+
+HABIT TENDENCY: Direct from habit_1 answer
+
+NEURODIVERGENT SCORES:
+- hyperfocus_tendency = average of nd_1 and nd_2 slider values × 2 (0–10)
+- sensory_sensitivity = nd_3 slider value × 2 (0–10)
+- initiation_difficulty = derived: if proc_1 is overwhelmed or interest_blocked AND proc_2 >= 4, score 8–10; otherwise scale from proc_2 + proc_4
+
+PROCRASTINATION MODIFIER → archetype modifier mapping:
+- perfectionist → precision
+- thrill_seeker → novelty_seeking
+- overwhelmed → wandering
+- interest_blocked → novelty_seeking
+- anxious → deep_diving
+- rebellious → wandering
+
+scoreQuiz(answers) should return:
+{
+  chronotype_score: number,
+  chronotype_key: 'lion' | 'bear' | 'wolf' | 'dolphin',
+  productivity_style: string,
+  procrastination_type: string,
+  habit_tendency: string,
+  social_jetlag: number,
+  demand_avoidance: number,
+  initiation_difficulty: number,
+  hyperfocus_tendency: number,
+  sensory_sensitivity: number,
+  structure_preference: string, // derived from prod_4: structured_high→rigid, structured_moderate→thematic, fluid/audhd_signal→fluid
+  archetype_modifier: string,
+  archetype_id: string // modifier_chronotype_key
+}
+
+---
+
+## PART 4 — NEW QUIZFLOW COMPONENT (replace src/components/QuizFlow.jsx)
+
+VISUAL DESIGN:
+- One question per screen, full page
+- Progress bar at top showing X of 20 questions (segments, not percentage)
+- Section label above question in small caps (e.g. "CHRONOTYPE · 1 OF 5")
+- Question in Fraunces serif, large (28–32px)
+- Subtext in Inter, muted, smaller
+- Answer options as large tap-target cards (min 60px tall, full width)
+- Selected state: accent border + subtle accent background tint
+- Slider questions: custom styled range input with min/max labels
+- Scale 5 questions: 5 large dot/button options labeled 1–5 with end labels
+
+BEHAVIOR:
+- Tapping a single_select option auto-advances after 300ms (same as existing quiz)
+- Slider and scale_5 require explicit "Next" button
+- Back button top-left always visible
+- No skip option — but keep the logic gentle, not demanding
+- Framer Motion slide transitions: new question slides in from right, old slides out left
+- Store answers in useState as array of { questionId, answerId, value }
+- On completion: call scoreQuiz(answers) from scoring.js, then call the existing updateProfile + save dimensional scores to Appwrite, then call onComplete(archetype) to trigger ProfileReveal
+
+---
+
+## PART 5 — PROFILE REVEAL (update src/components/ProfileReveal.jsx)
+
+The existing reveal shows archetype name + tagline. EXTEND it with a second screen after the initial reveal.
+
+After user taps "Continue" on the archetype reveal, show a full dimensional breakdown page with these sections:
+
+SECTION A — YOUR CHRONOTYPE
+Show: chronotype name (Lion/Bear/Wolf/Dolphin), chronotype_score as a horizontal bar, social jetlag in plain language ("Your schedule runs about 2.5 hours ahead of your biology"), the light/melatonin/napping strategy table row for their type (build this data into the component).
+
+SECTION B — HOW YOU WORK BEST
+Show productivity_style with a one-paragraph description:
+- Prioritizer: "You think in outcomes. You cut through ambiguity by asking 'what's the actual goal here?' You work best when you can focus on the highest-value task and ignore the rest."
+- Planner: "You think in sequences. You feel most productive when you have a clear map. Unexpected detours cost you more than most people."
+- Arranger: "You think in relationships. You organize by people and energy, not just tasks. Collaboration fuels you."
+- Visualizer: "You think in systems. You see the whole picture before others do, and struggle when forced to zoom in too early."
+
+SECTION C — YOUR PROCRASTINATION PATTERN
+Show procrastination_type with honest, non-shaming description:
+- perfectionist: "You delay to avoid the gap between what you made and what you imagined. Starting is the hardest part because starting makes failure possible."
+- thrill_seeker: "Urgency is your fuel. The research says you likely believe you do better work under pressure — the data is more mixed than it feels."
+- overwhelmed: "The task feels too big to start, so your brain stalls at the threshold. This isn't laziness — it's your nervous system protecting you from an undefined threat."
+- interest_blocked: "Your brain runs on dopamine, not deadlines. If something isn't interesting, urgent, challenging, or novel, motivation genuinely doesn't activate. This is neurological, not a character flaw."
+- anxious: "Fear of judgment keeps you at the starting line. The task isn't the problem — the imagined audience is."
+- rebellious: "Being told you have to do something (including by yourself) triggers resistance. Your autonomy is non-negotiable to your nervous system."
+
+Then show demand_avoidance score if >= 6: add a note: "You also show signs of demand avoidance — the more something feels mandatory, the harder it becomes, even if you want to do it. Framing tasks as choices rather than obligations helps."
+
+SECTION D — HOW YOU BUILD HABITS
+Show habit_tendency with description:
+- upholder: "You meet expectations reliably — your own and others'. This is a gift, but watch for rigidity and difficulty when systems break down."
+- questioner: "You'll follow through when you understand why. Rules without reasons frustrate you. Build your own reasoning into every system."
+- obliger: "You show up for others more reliably than for yourself. External accountability isn't weakness — it's your operating system. Build it deliberately."
+- rebel: "You resist expectations as a core expression of identity. The trick is finding ways to frame goals as your own choice, not obligations."
+
+SECTION E — YOUR INITIATION & FOCUS PROFILE
+Show three scores as simple labeled bars (0–10):
+- Initiation difficulty: [bar]
+- Hyperfocus tendency: [bar]
+- Sensory sensitivity: [bar]
+
+If initiation_difficulty >= 7: "Starting tasks is a significant friction point for you. The app will prioritize getting you to the starting line, not just tracking what's planned."
+If hyperfocus_tendency >= 7: "You're prone to deep absorption. This is a superpower and a liability — you'll need time boundaries, not just task lists."
+If sensory_sensitivity >= 7: "Your environment is a major factor in your performance. Treat it as a tool, not an afterthought."
+
+SECTION F — WHAT THIS MEANS FOR YOUR SCHEDULE
+Pull from structure_preference:
+- rigid: "You work best with specific time blocks. The app will give you precise scheduling."
+- thematic: "You work best with themed time zones, not rigid appointments. 'This block is for creative work' beats '9:15: write email.'"
+- fluid: "You work best when you can follow your energy. The app will offer anchors, not schedules."
+
+Include the recommended strategies for their chronotype (light therapy, caffeine cutoff, nap timing — pull from the research for their type).
+
+END: A single "Enter Circaday" button that completes onboarding.
+
+---
+
+## PART 6 — PROFILE TAB UPDATE (update Profile section in App.jsx or create ProfileTab.jsx)
+
+Replace the existing profile tab (which just shows archetype name/tagline/description) with a scrollable profile card showing all dimensions. Design it as a clean summary view — not the full reveal, but a reference card the user can return to.
+
+Show:
+- Archetype name + tagline at top
+- Chronotype badge (Lion/Bear/Wolf/Dolphin icon + score)
+- Three key trait pills: productivity_style / procrastination_type / habit_tendency
+- Three scored bars: initiation / hyperfocus / sensory
+- A "Retake Assessment" button (ghost style) at bottom
+
+---
+
+## IMPLEMENTATION NOTES
+
+- The existing calculateArchetype() in archetypes.js can be preserved for backward compatibility, but the new scoring.js takes precedence for new users
+- scoreQuiz() should produce answers in the format calculateArchetype() expects as a fallback { questionId: 'chronotype', answerId: 'A'|'B'|'C'|'D' }
+- All dimensional scores should be saved to Appwrite profiles collection via an extended updateProfile() call or a new updateProfileDimensions(userId, scores) function in db.js
+- The quiz must be completable in one sitting — no multi-session state (keep it simple)
+- Error states silent (console.error only)
+- No shame language anywhere in the UI — reframe everything as information, not judgment
+- Every archetype and every score is presented with a "this is how you're wired, not what's wrong with you" frame

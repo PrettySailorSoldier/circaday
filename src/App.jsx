@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { account } from './lib/appwrite'
-import { getProfile, updateProfile } from './lib/db'
+import { getProfile, updateProfile, updateProfileDimensions } from './lib/db'
 import Auth from './components/Auth'
 import QuizFlow from './components/QuizFlow'
 import ProfileReveal from './components/ProfileReveal'
@@ -15,6 +15,7 @@ import BottomNav from './components/BottomNav'
 import DaySchedule from './components/DaySchedule'
 import MirrorTab from './components/MirrorTab'
 import SleepTracker from './components/SleepTracker'
+import ProfileTab from './components/ProfileTab'
 import MomentumTool from './components/MomentumTool'
 import { useArchetype } from './hooks/useArchetype'
 import { useCurrentPhase } from './hooks/useCurrentPhase'
@@ -156,15 +157,11 @@ function MainApp() {
         {activeTab === 'habits' && <HabitsTab />}
         {activeTab === 'systems' && <SystemsTab />}
         {activeTab === 'profile' && (
-          <div style={styles.profileContainer}>
-            <h2 style={styles.profileTitle}>{archetype?.name}</h2>
-            <p style={styles.profileTagline}>{archetype?.tagline}</p>
-            <p style={styles.profileDescription}>{archetype?.description}</p>
-            <SleepTracker
-              currentArchetypeId={profile?.archetype_id}
-              onChronotypeUpdate={handleChronotypeUpdate}
-            />
-          </div>
+          <ProfileTab
+            archetype={archetype}
+            profile={profile}
+            onChronotypeUpdate={handleChronotypeUpdate}
+          />
         )}
       </div>
       <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
@@ -177,6 +174,7 @@ export default function App() {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [quizArchetype, setQuizArchetype] = useState(null)
+  const [quizScores, setQuizScores] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -186,13 +184,7 @@ export default function App() {
   async function checkSession() {
     try {
       const user = await account.get()
-      // Map Appwrite user to a session-like object compatible with existing code (user.id)
-      const sessionData = {
-        user: {
-          id: user.$id,
-          ...user
-        }
-      }
+      const sessionData = { user: { id: user.$id, ...user } }
       setSession(sessionData)
       checkProfile(user.$id)
     } catch (error) {
@@ -206,6 +198,23 @@ export default function App() {
     const profileData = await getProfile(userId)
     setProfile(profileData)
     setLoading(false)
+  }
+
+  async function handleQuizComplete(scores, rawAnswers) {
+    setQuizScores(scores)
+    try {
+      // Save dimensional scores to Appwrite
+      if (session?.user?.id) {
+        await updateProfileDimensions(session.user.id, scores)
+      }
+    } catch (e) {
+      console.error('Failed to save dimensional scores:', e)
+    }
+    // Resolve the archetype object for ProfileReveal via the existing archetypes lookup
+    const { archetypes } = await import('./data/archetypes')
+    const resolved = archetypes[scores.archetype_id] ?? { name: scores.archetype_id, tagline: '', description: '' }
+    setQuizArchetype(resolved)
+    navigate('/reveal')
   }
 
   if (loading) {
@@ -223,18 +232,19 @@ export default function App() {
       } />
       <Route path="/quiz" element={
         !session ? <Navigate to="/auth" /> :
-        <QuizFlow onComplete={(archetype) => {
-          setQuizArchetype(archetype)
-          navigate('/reveal')
-        }} />
+        <QuizFlow
+          userId={session.user.id}
+          onComplete={handleQuizComplete}
+        />
       } />
       <Route path="/reveal" element={
         !session ? <Navigate to="/auth" /> :
         !quizArchetype ? <Navigate to="/quiz" /> :
         <ProfileReveal
           archetype={quizArchetype}
+          scores={quizScores}
           onContinue={() => {
-            setProfile({ archetype_id: quizArchetype.id })
+            setProfile({ archetype_id: quizArchetype.id ?? quizScores?.archetype_id })
             navigate('/')
           }}
         />

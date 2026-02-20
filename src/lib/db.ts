@@ -171,6 +171,26 @@ export async function updateProfile(userId, updates) {
   }
 }
 
+export async function updateProfileDimensions(userId: string, scores: Record<string, unknown>) {
+  const fields = [
+    'chronotype_score', 'productivity_style', 'procrastination_type',
+    'habit_tendency', 'social_jetlag', 'demand_avoidance',
+    'initiation_difficulty', 'hyperfocus_tendency', 'sensory_sensitivity',
+    'structure_preference', 'archetype_id',
+  ]
+  const payload: Record<string, unknown> = {}
+  for (const key of fields) {
+    if (scores[key] !== undefined) payload[key] = scores[key]
+  }
+  try {
+    const data = await databases.updateDocument(DB, COL.profiles, userId, payload)
+    return { data, error: null }
+  } catch (error) {
+    console.error('Error updating profile dimensions:', error)
+    return { data: null, error }
+  }
+}
+
 // ============ DAILY INTENTIONS ============
 
 export async function getTodayIntention(userId) {
