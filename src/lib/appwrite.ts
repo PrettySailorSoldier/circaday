@@ -17,6 +17,7 @@ export const COL = {
   habitLogs:    import.meta.env.VITE_APPWRITE_COLLECTION_HABIT_LOGS,
   systems:      import.meta.env.VITE_APPWRITE_COLLECTION_SYSTEMS,
   workSessions: import.meta.env.VITE_APPWRITE_COLLECTION_WORK_SESSIONS,
+  sleepLogs:    import.meta.env.VITE_APPWRITE_COLLECTION_SLEEP_LOGS,
 }
 
 export { Query }

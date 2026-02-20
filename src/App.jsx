@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { account } from './lib/appwrite'
-import { getProfile } from './lib/db'
+import { getProfile, updateProfile } from './lib/db'
 import Auth from './components/Auth'
 import QuizFlow from './components/QuizFlow'
 import ProfileReveal from './components/ProfileReveal'
@@ -13,6 +13,7 @@ import SystemsTab from './components/SystemsTab'
 import BottomNav from './components/BottomNav'
 import DaySchedule from './components/DaySchedule'
 import MirrorTab from './components/MirrorTab'
+import SleepTracker from './components/SleepTracker'
 import { useArchetype } from './hooks/useArchetype'
 import { useCurrentPhase } from './hooks/useCurrentPhase'
 
@@ -87,6 +88,15 @@ function MainApp() {
     setSessionData(null)
   }
 
+  async function handleChronotypeUpdate(newChronotype) {
+    if (!profile?.$id) return
+    try {
+      await updateProfile(profile.$id, { archetype_id: newChronotype })
+    } catch (e) {
+      console.error('Failed to update chronotype:', e)
+    }
+  }
+
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
@@ -116,6 +126,10 @@ function MainApp() {
             <h2 style={styles.profileTitle}>{archetype?.name}</h2>
             <p style={styles.profileTagline}>{archetype?.tagline}</p>
             <p style={styles.profileDescription}>{archetype?.description}</p>
+            <SleepTracker
+              currentArchetypeId={profile?.archetype_id}
+              onChronotypeUpdate={handleChronotypeUpdate}
+            />
           </div>
         )}
       </div>

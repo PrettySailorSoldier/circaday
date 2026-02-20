@@ -20,7 +20,81 @@ export async function signOut() {
   }
 }
 
+// ─── Sleep Logs ───────────────────────────────────────────────────────────────
 
+export async function createSleepLog(userId, logData) {
+  try {
+    const data = await databases.createDocument(DB, COL.sleepLogs, ID_GEN.unique(), {
+      user_id: userId,
+      ...logData,
+    })
+    return { data, error: null }
+  } catch (error) {
+    console.error('Error creating sleep log:', error)
+    return { data: null, error }
+  }
+}
+
+export async function getSleepLogs(userId, limitDays = 30) {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - limitDays)
+  const cutoffStr = cutoff.toISOString().slice(0, 10) // YYYY-MM-DD
+  try {
+    const response = await databases.listDocuments(DB, COL.sleepLogs, [
+      Query.equal('user_id', userId),
+      Query.greaterThanEqual('log_date', cutoffStr),
+      Query.orderDesc('log_date'),
+      Query.limit(100),
+    ])
+    return { data: response.documents, error: null }
+  } catch (error) {
+    console.error('Error fetching sleep logs:', error)
+    return { data: [], error }
+  }
+}
+
+export async function updateSleepLog(logId, updates) {
+  try {
+    const data = await databases.updateDocument(DB, COL.sleepLogs, logId, updates)
+    return { data, error: null }
+  } catch (error) {
+    console.error('Error updating sleep log:', error)
+    return { data: null, error }
+  }
+}
+
+// Pure function — no Appwrite calls, safe to use client-side too
+export function calculateChronotype(sleepLogs) {
+  const freeDays = sleepLogs.filter(l => l.is_free_day)
+
+  if (freeDays.length < 3) {
+    return { chronotype: null, confidence: 'insufficient', freeDaysUsed: freeDays.length, msfsc: null }
+  }
+
+  const midpoints = freeDays.map(log => {
+    const [bedH, bedM] = log.bedtime.split(':').map(Number)
+    const [wakeH, wakeM] = log.wake_time.split(':').map(Number)
+    const bedDecimal = bedH + bedM / 60
+    let wakeDecimal = wakeH + wakeM / 60
+    // Handle crossing midnight
+    if (bedDecimal > wakeDecimal) wakeDecimal += 24
+    return bedDecimal + (wakeDecimal - bedDecimal) / 2
+  })
+
+  const msfsc = midpoints.reduce((a, b) => a + b, 0) / midpoints.length
+  // Normalise to 0-24
+  const normalised = ((msfsc % 24) + 24) % 24
+
+  let chronotype
+  if (normalised < 3.5) chronotype = 'lion'
+  else if (normalised < 5.0) chronotype = 'bear'
+  else if (normalised < 6.5) chronotype = 'wolf'
+  else chronotype = 'dolphin'
+
+  const confidence = freeDays.length >= 7 ? 'high' : freeDays.length >= 4 ? 'medium' : 'low'
+
+  return { chronotype, confidence, freeDaysUsed: freeDays.length, msfsc: Math.round(normalised * 100) / 100 }
+}
 // ============ PROFILES ============
 
 export async function getProfile(userId) {
